@@ -9,12 +9,26 @@
 // Shared memory name - use this to open from other processes
 #define EVICTION_HELPER_SHARED_MEMORY_NAME "Local\\EvictionHelperSharedMemory"
 
+// Priority values (maps to D3D12_RESIDENCY_PRIORITY)
+// 0 = MINIMUM, 1 = LOW, 2 = NORMAL, 3 = HIGH, 4 = MAXIMUM
+#define EVICTION_HELPER_PRIORITY_MINIMUM  0
+#define EVICTION_HELPER_PRIORITY_LOW      1
+#define EVICTION_HELPER_PRIORITY_NORMAL   2
+#define EVICTION_HELPER_PRIORITY_HIGH     3
+#define EVICTION_HELPER_PRIORITY_MAXIMUM  4
+
 // Shared data structure between eviction-helper and controlling applications
 struct EvictionHelperSharedData
 {
     // Input: Set this from the controlling application (in megabytes)
     int TargetVRAMUsageMB;          // Memory that is actively used (rendered to each frame)
     int TargetUnusedVRAMUsageMB;    // Memory that is allocated but not used
+
+    // Input: Residency priority for each memory type (0-4, see EVICTION_HELPER_PRIORITY_*)
+    int ActiveVRAMPriority;         // Priority for active VRAM (default: LOW)
+    int UnusedVRAMPriority;         // Priority for unused VRAM (default: MINIMUM)
+    int HeapPriority;               // Priority for D3D12 heaps (default: NORMAL)
+    int _paddingPriority;           // Padding for 8-byte alignment
 
     // Output: Current allocation state (actively used)
     uint64_t CurrentVRAMAllocationBytes;

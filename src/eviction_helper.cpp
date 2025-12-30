@@ -91,6 +91,37 @@ ComPtr<ID3D12Heap> g_Heap1GB;
 bool g_Allocate512MBHeap = false;
 bool g_Allocate1GBHeap = false;
 
+// Priority tracking for detecting changes
+int g_CurrentActiveVRAMPriority = EVICTION_HELPER_PRIORITY_LOW;
+int g_CurrentUnusedVRAMPriority = EVICTION_HELPER_PRIORITY_MINIMUM;
+int g_CurrentHeapPriority = EVICTION_HELPER_PRIORITY_NORMAL;
+
+// Priority names for ImGui combo
+const char* g_PriorityNames[] = { "Minimum", "Low", "Normal", "High", "Maximum" };
+
+// Convert index to D3D12_RESIDENCY_PRIORITY
+D3D12_RESIDENCY_PRIORITY IndexToPriority(int index)
+{
+    switch (index) {
+    case EVICTION_HELPER_PRIORITY_MINIMUM: return D3D12_RESIDENCY_PRIORITY_MINIMUM;
+    case EVICTION_HELPER_PRIORITY_LOW:     return D3D12_RESIDENCY_PRIORITY_LOW;
+    case EVICTION_HELPER_PRIORITY_NORMAL:  return D3D12_RESIDENCY_PRIORITY_NORMAL;
+    case EVICTION_HELPER_PRIORITY_HIGH:    return D3D12_RESIDENCY_PRIORITY_HIGH;
+    case EVICTION_HELPER_PRIORITY_MAXIMUM: return D3D12_RESIDENCY_PRIORITY_MAXIMUM;
+    default: return D3D12_RESIDENCY_PRIORITY_NORMAL;
+    }
+}
+
+// Apply priority to all resources in a vector
+void ApplyPriorityToResources(std::vector<VRAMRenderTarget>& targets, int priorityIndex)
+{
+    D3D12_RESIDENCY_PRIORITY priority = IndexToPriority(priorityIndex);
+    for (auto& rt : targets) {
+        ID3D12Pageable* pageable = rt.Resource.Get();
+        g_Device->SetResidencyPriority(1, &pageable, &priority);
+    }
+}
+
 bool CreateDeviceD3D(HWND hWnd);
 void CleanupDeviceD3D();
 void CreateRenderTarget();
@@ -112,6 +143,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
         return 1;
     }
     g_SharedMem.pData->IsRunning = 1;
+
+    // Initialize default priority values
+    g_SharedMem.pData->ActiveVRAMPriority = EVICTION_HELPER_PRIORITY_LOW;
+    g_SharedMem.pData->UnusedVRAMPriority = EVICTION_HELPER_PRIORITY_MINIMUM;
+    g_SharedMem.pData->HeapPriority = EVICTION_HELPER_PRIORITY_NORMAL;
 
     // Register window class
     WNDCLASSEXW wc = {};
@@ -216,6 +252,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
             AllocateUnusedVRAMRenderTargets(targetUnusedBytes);
         }
 
+        // Check for priority changes and apply to existing resources
+        if (g_SharedMem.pData->ActiveVRAMPriority != g_CurrentActiveVRAMPriority) {
+            g_CurrentActiveVRAMPriority = g_SharedMem.pData->ActiveVRAMPriority;
+            ApplyPriorityToResources(g_VRAMRenderTargets, g_CurrentActiveVRAMPriority);
+        }
+        if (g_SharedMem.pData->UnusedVRAMPriority != g_CurrentUnusedVRAMPriority) {
+            g_CurrentUnusedVRAMPriority = g_SharedMem.pData->UnusedVRAMPriority;
+            ApplyPriorityToResources(g_UnusedVRAMRenderTargets, g_CurrentUnusedVRAMPriority);
+        }
+        if (g_SharedMem.pData->HeapPriority != g_CurrentHeapPriority) {
+            g_CurrentHeapPriority = g_SharedMem.pData->HeapPriority;
+            D3D12_RESIDENCY_PRIORITY priority = IndexToPriority(g_CurrentHeapPriority);
+            if (g_Heap512MB) {
+                ID3D12Pageable* pageable = g_Heap512MB.Get();
+                g_Device->SetResidencyPriority(1, &pageable, &priority);
+            }
+            if (g_Heap1GB) {
+                ID3D12Pageable* pageable = g_Heap1GB.Get();
+                g_Device->SetResidencyPriority(1, &pageable, &priority);
+            }
+        }
+
         // Start ImGui frame
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
@@ -226,9 +284,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 
         ImGui::Text("Active VRAM (rendered each frame):");
         ImGui::SliderInt("Active MB", &g_SharedMem.pData->TargetVRAMUsageMB, 0, 32<<10, "%d MB");
+        ImGui::Combo("Active Priority", &g_SharedMem.pData->ActiveVRAMPriority, g_PriorityNames, IM_ARRAYSIZE(g_PriorityNames));
 
         ImGui::Text("Unused VRAM (allocated but idle):");
         ImGui::SliderInt("Unused MB", &g_SharedMem.pData->TargetUnusedVRAMUsageMB, 0, 32<<10, "%d MB");
+        ImGui::Combo("Unused Priority", &g_SharedMem.pData->UnusedVRAMPriority, g_PriorityNames, IM_ARRAYSIZE(g_PriorityNames));
 
         ImGui::Separator();
         ImGui::Text("D3D12 Heap Allocations (VRAM):");
@@ -240,6 +300,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
                 heapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
                 heapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES;
                 g_Device->CreateHeap(&heapDesc, IID_PPV_ARGS(&g_Heap512MB));
+                if (g_Heap512MB) {
+                    ID3D12Pageable* pageable = g_Heap512MB.Get();
+                    D3D12_RESIDENCY_PRIORITY priority = IndexToPriority(g_SharedMem.pData->HeapPriority);
+                    g_Device->SetResidencyPriority(1, &pageable, &priority);
+                }
             } else if (!g_Allocate512MBHeap && g_Heap512MB) {
                 g_Heap512MB.Reset();
             }
@@ -252,10 +317,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
                 heapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
                 heapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES;
                 g_Device->CreateHeap(&heapDesc, IID_PPV_ARGS(&g_Heap1GB));
+                if (g_Heap1GB) {
+                    ID3D12Pageable* pageable = g_Heap1GB.Get();
+                    D3D12_RESIDENCY_PRIORITY priority = IndexToPriority(g_SharedMem.pData->HeapPriority);
+                    g_Device->SetResidencyPriority(1, &pageable, &priority);
+                }
             } else if (!g_Allocate1GBHeap && g_Heap1GB) {
                 g_Heap1GB.Reset();
             }
         }
+        ImGui::Combo("Heap Priority", &g_SharedMem.pData->HeapPriority, g_PriorityNames, IM_ARRAYSIZE(g_PriorityNames));
 
         ImGui::Separator();
         ImGui::Text("Active Render Targets: %u", g_SharedMem.pData->AllocatedRenderTargetCount);
@@ -271,6 +342,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
         ImGui::Separator();
         ImGui::Text("D3D12 Heap Allocation: %.2f GB", heapAllocation / (1024.0 * 1024.0 * 1024.0));
         ImGui::Text("Total VRAM Usage: %.2f GB", totalMemory / (1024.0 * 1024.0 * 1024.0));
+
+        // Calculate memory by priority level
+        UINT64 memoryByPriority[5] = { 0, 0, 0, 0, 0 };
+        int activePri = std::clamp(g_SharedMem.pData->ActiveVRAMPriority, 0, 4);
+        int unusedPri = std::clamp(g_SharedMem.pData->UnusedVRAMPriority, 0, 4);
+        int heapPri = std::clamp(g_SharedMem.pData->HeapPriority, 0, 4);
+        memoryByPriority[activePri] += g_SharedMem.pData->CurrentVRAMAllocationBytes;
+        memoryByPriority[unusedPri] += g_SharedMem.pData->CurrentUnusedVRAMAllocationBytes;
+        memoryByPriority[heapPri] += heapAllocation;
+
+        ImGui::Separator();
+        ImGui::Text("Memory by Priority:");
+        for (int i = 0; i < 5; i++) {
+            if (memoryByPriority[i] > 0) {
+                ImGui::Text("  %s: %.2f GB", g_PriorityNames[i], memoryByPriority[i] / (1024.0 * 1024.0 * 1024.0));
+            }
+        }
 
         ImGui::Separator();
         ImGui::Text("Video Memory Info (Local/VRAM):");
@@ -773,9 +861,9 @@ void AllocateVRAMRenderTargets(UINT64 targetBytes)
             break;
         }
 
-        // Set residency priority to HIGH
+        // Set residency priority from shared memory
         ID3D12Pageable* pageable = vramRT.Resource.Get();
-        D3D12_RESIDENCY_PRIORITY priority = D3D12_RESIDENCY_PRIORITY_LOW;
+        D3D12_RESIDENCY_PRIORITY priority = IndexToPriority(g_SharedMem.pData->ActiveVRAMPriority);
         g_Device->SetResidencyPriority(1, &pageable, &priority);
 
         // Create RTV
@@ -880,9 +968,9 @@ void AllocateUnusedVRAMRenderTargets(UINT64 targetBytes)
             break;
         }
 
-        // Set residency priority to NORMAL (unused memory can be evicted more easily)
+        // Set residency priority from shared memory
         ID3D12Pageable* pageable = vramRT.Resource.Get();
-        D3D12_RESIDENCY_PRIORITY priority = D3D12_RESIDENCY_PRIORITY_MINIMUM;
+        D3D12_RESIDENCY_PRIORITY priority = IndexToPriority(g_SharedMem.pData->UnusedVRAMPriority);
         g_Device->SetResidencyPriority(1, &pageable, &priority);
 
         // Create RTV
