@@ -25,10 +25,8 @@ struct EvictionHelperSharedData
     int TargetUnusedVRAMUsageMB;    // Memory that is allocated but not used
 
     // Input: Residency priority for each memory type (0-4, see EVICTION_HELPER_PRIORITY_*)
-    int ActiveVRAMPriority;         // Priority for active VRAM (default: LOW)
-    int UnusedVRAMPriority;         // Priority for unused VRAM (default: MINIMUM)
-    int HeapPriority;               // Priority for D3D12 heaps (default: NORMAL)
-    int _paddingPriority;           // Padding for 8-byte alignment
+    int ActiveVRAMPriority;         // Priority for active VRAM (default: HIGH)
+    int UnusedVRAMPriority;         // Priority for unused VRAM (default: NORMAL)
 
     // Output: Current allocation state (actively used)
     uint64_t CurrentVRAMAllocationBytes;
