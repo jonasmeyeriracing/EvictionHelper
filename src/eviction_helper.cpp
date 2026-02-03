@@ -33,6 +33,7 @@ constexpr UINT NUM_FRAMES	 = 2;
 
 // Command line options
 bool g_EnableDebugLayer = false;
+bool g_EnableSharedMemory = true;
 
 // Forward declarations
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -149,13 +150,21 @@ void		  QueryMemoryInfo();
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow)
 {
 	// Parse command line arguments
-	if(lpCmdLine && strstr(lpCmdLine, "-debug"))
+	if(lpCmdLine)
 	{
-		g_EnableDebugLayer = true;
+		if(strstr(lpCmdLine, "-debug"))
+			g_EnableDebugLayer = true;
+		if(strstr(lpCmdLine, "-noshared"))
+			g_EnableSharedMemory = false;
 	}
 
 	// Create shared memory for inter-process communication
-	if(!EvictionHelper_CreateSharedMemory(&g_SharedMem))
+	if(!g_EnableSharedMemory)
+	{
+		static EvictionHelperSharedData Shared;
+		g_SharedMem.pData = &Shared;
+	}
+	else if(!EvictionHelper_CreateSharedMemory(&g_SharedMem))
 	{
 		MessageBoxA(NULL, "Failed to create shared memory", "Error", MB_OK | MB_ICONERROR);
 		return 1;
@@ -441,8 +450,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 	{
 		g_SharedMem.pData->IsRunning = 0;
 	}
-	EvictionHelper_CloseSharedMemory(&g_SharedMem);
-
+	if(g_EnableSharedMemory)
+	{
+		EvictionHelper_CloseSharedMemory(&g_SharedMem);
+	}
 	DestroyWindow(hWnd);
 	UnregisterClassW(wc.lpszClassName, hInstance);
 
