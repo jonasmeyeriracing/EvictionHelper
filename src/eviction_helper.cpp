@@ -13,6 +13,7 @@
 #include <string>
 #include <chrono>
 #include <algorithm>
+#include <cctype>
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"
@@ -34,6 +35,7 @@ constexpr UINT NUM_FRAMES	 = 2;
 // Command line options
 bool g_EnableDebugLayer = false;
 bool g_EnableSharedMemory = true;
+char g_GpuFilter[256] = "";
 
 // Forward declarations
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -156,6 +158,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 			g_EnableDebugLayer = true;
 		if(strstr(lpCmdLine, "-noshared"))
 			g_EnableSharedMemory = false;
+		const char* gpuArg = strstr(lpCmdLine, "-gpu");
+		if(gpuArg)
+		{
+			gpuArg += 4; // skip "-gpu"
+			while(*gpuArg == ' ')
+				gpuArg++;
+			size_t len = 0;
+			while(gpuArg[len] && gpuArg[len] != ' ' && gpuArg[len] != '-')
+				len++;
+			if(len > 0 && len < sizeof(g_GpuFilter))
+			{
+				memcpy(g_GpuFilter, gpuArg, len);
+				g_GpuFilter[len] = '\0';
+			}
+		}
 	}
 
 	// Create shared memory for inter-process communication
@@ -510,10 +527,33 @@ bool CreateDeviceD3D(HWND hWnd)
 		if(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
 			continue;
 
+		// Filter by GPU name if specified
+		if(g_GpuFilter[0])
+		{
+			// Convert wide string to narrow and do case-insensitive substring match
+			char adapterName[256];
+			WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, adapterName, sizeof(adapterName), NULL, NULL);
+			// Convert both to lowercase for comparison
+			char adapterLower[256], filterLower[256];
+			for(int j = 0; adapterName[j]; j++)
+				adapterLower[j] = (char)tolower((unsigned char)adapterName[j]);
+			adapterLower[strlen(adapterName)] = '\0';
+			for(int j = 0; g_GpuFilter[j]; j++)
+				filterLower[j] = (char)tolower((unsigned char)g_GpuFilter[j]);
+			filterLower[strlen(g_GpuFilter)] = '\0';
+			if(!strstr(adapterLower, filterLower))
+				continue;
+		}
+
 		if(SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device))))
 		{
 			device.As(&g_Device);
 			adapter.As(&g_Adapter);
+			// Store device name in shared memory
+			if(g_SharedMem.pData)
+			{
+				WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, g_SharedMem.pData->DeviceName, sizeof(g_SharedMem.pData->DeviceName), NULL, NULL);
+			}
 			break;
 		}
 	}

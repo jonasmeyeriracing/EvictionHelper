@@ -63,6 +63,9 @@ struct EvictionHelperSharedData
 
     // Frame counter - increments each frame, use to verify app is running
     uint64_t FrameCount;
+
+    // Device info
+    char DeviceName[128];       // Name of the selected GPU adapter
 };
 
 // Helper struct for managing shared memory handle and pointer

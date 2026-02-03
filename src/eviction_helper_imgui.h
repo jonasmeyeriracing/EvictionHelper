@@ -17,6 +17,12 @@ inline void EvictionHelper_RenderImGui(EvictionHelperSharedData* data)
 	if (!data)
 		return;
 
+	if (data->DeviceName[0])
+	{
+		ImGui::Text("Device: %s", data->DeviceName);
+		ImGui::Separator();
+	}
+
 	ImGui::SeparatorText("Active VRAM (rendered each frame):");
 	ImGui::Combo("Active Priority", &data->ActiveVRAMPriority, EvictionHelper_PriorityNames, IM_ARRAYSIZE(EvictionHelper_PriorityNames));
 	ImGui::SliderInt("Active MB", &data->TargetVRAMUsageMB, 0, 32 << 10, "%d MB");
