@@ -36,6 +36,9 @@ inline void EvictionHelper_RenderImGui(EvictionHelperSharedData* data)
 		data->Allocate512MBHeap = alloc512MB ? 1 : 0;
 	if (ImGui::Checkbox("Allocate 1 GB Heap", &alloc1GB))
 		data->Allocate1GBHeap = alloc1GB ? 1 : 0;
+	bool evictWhenMinimized = data->EvictWhenMinimized != 0;
+	if (ImGui::Checkbox("Evict when minimized", &evictWhenMinimized))
+		data->EvictWhenMinimized = evictWhenMinimized ? 1 : 0;
 
 	ImGui::SeparatorText("Memory Usage");
 	uint64_t heapAllocation = data->CurrentHeapAllocationBytes;

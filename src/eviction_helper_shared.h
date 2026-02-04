@@ -60,6 +60,7 @@ struct EvictionHelperSharedData
     // Status flags
     uint32_t IsRunning;         // Set to 1 while eviction-helper is running
     uint32_t RequestShutdown;   // Set to 1 from controller to request shutdown
+    uint32_t EvictWhenMinimized; // Set to 1 to evict all memory when minimized
 
     // Frame counter - increments each frame, use to verify app is running
     uint64_t FrameCount;

@@ -105,6 +105,9 @@ ComPtr<ID3D12Heap> g_Heap1GB;
 int g_CurrentActiveVRAMPriority = EVICTION_HELPER_DEFAULT_ACTIVE;
 int g_CurrentUnusedVRAMPriority = EVICTION_HELPER_DEFAULT_UNUSED;
 
+// Eviction state tracking
+bool g_ResourcesEvicted = false;
+
 // Convert index to D3D12_RESIDENCY_PRIORITY
 D3D12_RESIDENCY_PRIORITY IndexToPriority(int index)
 {
@@ -134,6 +137,50 @@ void ApplyPriorityToResources(std::vector<VRAMRenderTarget>& targets, int priori
 		ID3D12Pageable* pageable = rt.Resource.Get();
 		g_Device->SetResidencyPriority(1, &pageable, &priority);
 	}
+}
+
+// Evict all VRAM resources
+void EvictAllResources()
+{
+	if(g_ResourcesEvicted)
+		return;
+
+	std::vector<ID3D12Pageable*> pageables;
+	for(auto& rt : g_VRAMRenderTargets)
+		pageables.push_back(rt.Resource.Get());
+	for(auto& rt : g_UnusedVRAMRenderTargets)
+		pageables.push_back(rt.Resource.Get());
+	if(g_Heap512MB)
+		pageables.push_back(g_Heap512MB.Get());
+	if(g_Heap1GB)
+		pageables.push_back(g_Heap1GB.Get());
+
+	if(!pageables.empty())
+		g_Device->Evict((UINT)pageables.size(), pageables.data());
+
+	g_ResourcesEvicted = true;
+}
+
+// Make all VRAM resources resident
+void MakeAllResourcesResident()
+{
+	if(!g_ResourcesEvicted)
+		return;
+
+	std::vector<ID3D12Pageable*> pageables;
+	for(auto& rt : g_VRAMRenderTargets)
+		pageables.push_back(rt.Resource.Get());
+	for(auto& rt : g_UnusedVRAMRenderTargets)
+		pageables.push_back(rt.Resource.Get());
+	if(g_Heap512MB)
+		pageables.push_back(g_Heap512MB.Get());
+	if(g_Heap1GB)
+		pageables.push_back(g_Heap1GB.Get());
+
+	if(!pageables.empty())
+		g_Device->MakeResident((UINT)pageables.size(), pageables.data());
+
+	g_ResourcesEvicted = false;
 }
 
 bool		  CreateDeviceD3D(HWND hWnd);
@@ -265,6 +312,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 		{
 			running = false;
 			break;
+		}
+
+		// Handle minimized state
+		if(IsIconic(hWnd))
+		{
+			if(g_SharedMem.pData->EvictWhenMinimized)
+				EvictAllResources();
+			Sleep(100);
+			continue;
+		}
+		else if(g_ResourcesEvicted)
+		{
+			MakeAllResourcesResident();
 		}
 
 		// Frame timing for 30 FPS cap
